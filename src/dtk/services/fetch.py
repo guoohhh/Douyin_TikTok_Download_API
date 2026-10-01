@@ -27,6 +27,7 @@ See docs/design/01-architecture.md.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -40,12 +41,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dtk.core.errors import (
     DtkError,
     Internal,
+    InvalidParam,
     NotFound,
     UpstreamChanged,
     UpstreamRiskControl,
 )
 from dtk.core.logging import get_logger
-from dtk.core.types import Outcome, Platform
+from dtk.core.types import IdentityState, Outcome, Platform
 from dtk.db.models import Identity as IdentityRow
 from dtk.db.models import RequestLog
 from dtk.identity.pool import IdentityPool
@@ -232,7 +234,7 @@ ProxyResolver = Callable[[str], Awaitable[str | None]]
 #: `verifyFp` in the query is the `s_v_web_id` in the jar the request carries.
 #: Passing only the fingerprint is what let the two disagree, and a request whose
 #: signature names a different session than its cookies gets an empty payload.
-SignFn = Callable[[Platform, str, dict[str, Any], TransportIdentity], Awaitable[SignedRequest]]
+SignFn = Callable[[Platform, PlatformRequestSpec, TransportIdentity], Awaitable[SignedRequest]]
 
 
 class FetchService:
@@ -341,7 +343,7 @@ class FetchService:
                 fingerprint=identity.fingerprint,
                 proxy_url=identity.proxy_url,
             )
-            signed = await self._sign(platform, spec["url"], dict(spec.get("params") or {}), sender)
+            signed = await self._sign(platform, spec, sender)
             signer = signed.signer
 
             outbound = _to_transport_spec(spec, signed, endpoint)
@@ -465,6 +467,29 @@ class FetchService:
         ctx: FetchContext | None = None,
     ) -> FetchResult:
         ctx = ctx or FetchContext()
+        if endpoint == "douyin.author_bookmarks":
+            if not ctx.identity_id:
+                raise InvalidParam(
+                    "identity is required for Douyin bookmarks", details={"field": "identity"}
+                )
+            try:
+                identity_key = uuid.UUID(ctx.identity_id)
+            except ValueError:
+                raise InvalidParam(
+                    "identity must be a uuid", details={"field": "identity"}
+                ) from None
+            row = await session.get(IdentityRow, identity_key)
+            if (
+                row is None
+                or row.platform != Platform.DOUYIN.value
+                or row.source != "imported"
+                or not row.authenticated
+                or row.state == IdentityState.RETIRED.value
+            ):
+                raise InvalidParam(
+                    "Douyin bookmarks require an active authenticated imported identity",
+                    details={"field": "identity"},
+                )
         adapter = get_adapter(platform)
         started = time.monotonic()
         digest = cache.cache_key(
@@ -689,6 +714,11 @@ def _to_transport_spec(
     signature in the query and none in the headers, and was answered 403.
     """
     body = spec.get("body")
+    body_bytes = (
+        json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+        if body is not None
+        else None
+    )
     return TransportRequestSpec(
         # The signed URL, so the query is exactly what was signed. `params` is
         # left None deliberately: handing the transport both would let it
@@ -696,8 +726,12 @@ def _to_transport_spec(
         url=signed.signed_url(spec["url"]) if signed.query else spec["url"],
         method=str(spec.get("method") or "GET"),
         params=None if signed.query else {k: str(v) for k, v in (spec.get("params") or {}).items()},
-        headers={**dict(spec.get("headers") or {}), **dict(signed.headers)},
-        json_body=body if body else None,
+        headers={
+            **dict(spec.get("headers") or {}),
+            **({"Content-Type": "application/json"} if body_bytes is not None else {}),
+            **dict(signed.headers),
+        },
+        body=body_bytes,
         # The logical name, never the signed URL: that carries tokens and would
         # make every log line unique and uncorrelatable.
         endpoint=endpoint,

@@ -431,6 +431,14 @@ class PlatformAdapter(Protocol):
         self, payload: Mapping[str, Any], *, fetched_at: datetime
     ) -> Page[Content]: ...
 
+    def parse_author_bookmarks(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        fetched_at: datetime,
+        requested_cursor: str | None = None,
+    ) -> Page[Content]: ...
+
     def parse_author_list(self, payload: Mapping[str, Any]) -> Page[Author]: ...
 
     def parse_author_collections(self, payload: Mapping[str, Any]) -> Page[Collection]: ...

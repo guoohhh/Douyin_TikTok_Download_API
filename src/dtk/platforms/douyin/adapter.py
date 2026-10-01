@@ -57,6 +57,17 @@ class DouyinAdapter:
     ) -> Page[Content]:
         return parser.parse_author_posts(payload, fetched_at=fetched_at)
 
+    def parse_author_bookmarks(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        fetched_at: datetime,
+        requested_cursor: str | None = None,
+    ) -> Page[Content]:
+        return parser.parse_author_bookmarks(
+            payload, fetched_at=fetched_at, requested_cursor=requested_cursor
+        )
+
     def parse_author_list(self, payload: Mapping[str, Any]) -> Page[Author]:
         """Douyin does not serve a follow graph to a guest identity.
 

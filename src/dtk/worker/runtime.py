@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import signal
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -31,7 +32,9 @@ from dtk.core.types import Platform
 from dtk.db.models import Identity as IdentityRow
 from dtk.db.models import Proxy as ProxyRow
 from dtk.identity.pool import IdentityPool
+from dtk.platforms.base import RequestSpec as PlatformRequestSpec
 from dtk.services.fetch import FetchService
+from dtk.signing.base import RequestSpec as SigningRequestSpec
 from dtk.worker.loop import PeriodicLoop
 from dtk.worker.main import DatabaseTaskStore, SessionFactory, TaskWorker, WorkerOptions
 from dtk.worker.ops import OperationDeps, OperationRunner
@@ -45,6 +48,20 @@ if TYPE_CHECKING:  # imported lazily at runtime to keep worker startup light
     from dtk.signing.registry import RegistryPolicy
 
 RPC_TIMEOUT_SECONDS = 90.0
+
+
+def _signing_request(spec: PlatformRequestSpec) -> SigningRequestSpec:
+    """Describe exactly the method, query and body the transport will send."""
+    return SigningRequestSpec(
+        method=spec["method"],
+        url=spec["url"],
+        params={k: str(v) for k, v in spec["params"].items()},
+        body=(
+            json.dumps(spec["body"], ensure_ascii=False, separators=(",", ":")).encode()
+            if spec.get("body") is not None
+            else None
+        ),
+    )
 
 
 class PoolCandidates:
@@ -126,7 +143,6 @@ async def build_runtime(
     from dtk.scheduler.circuit import circuit_config
     from dtk.scheduler.scheduler import Scheduler, SchedulerConfig
     from dtk.signing import NativeSigner, RpcSigner, SignerRegistry, native_signers
-    from dtk.signing.base import RequestSpec as SigningRequestSpec
     from dtk.signing.base import SignedParams, SigningSession, StaticFingerprint
     from dtk.transport import TransportIdentity, WreqTransport
     from dtk.worker.maintenance import Maintenance, MaintenanceConfig
@@ -188,7 +204,7 @@ async def build_runtime(
     )
 
     async def sign(
-        platform: Platform, url: str, params: dict[str, Any], sender: TransportIdentity
+        platform: Platform, spec: PlatformRequestSpec, sender: TransportIdentity
     ) -> SignedParams:
         # Returned whole rather than as a bare parameter dict: `.signer` is a
         # request_log column the Logs page renders, and unwrapping here is what
@@ -200,7 +216,7 @@ async def build_runtime(
         # `screen_width` the same request echoes in its query string. The ops
         # path already did this correctly through the same helper.
         return await signer_registry.sign(
-            SigningRequestSpec.get(url, {k: str(v) for k, v in params.items()}),
+            _signing_request(spec),
             StaticFingerprint.of(sender.fingerprint),
             # The identity's own session, so the browser signs in a page holding
             # exactly the cookies this request will be sent with.

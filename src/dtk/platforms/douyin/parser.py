@@ -467,6 +467,27 @@ def parse_author_collections(payload: Mapping[str, Any]) -> Page[Collection]:
     return Page(items=items, cursor=cursor, has_more=has_more)
 
 
+def parse_author_bookmarks(
+    payload: Mapping[str, Any], *, fetched_at: datetime, requested_cursor: str | None = None
+) -> Page[Content]:
+    """Parse the measured POST ``listcollection/`` response.
+
+    The live response carries ``aweme_list``, ``cursor`` and numeric
+    ``has_more`` (1/0). A missing or repeated next cursor is an upstream
+    contract failure, never an empty or terminal page.
+    """
+    root = _guard(payload)
+    items = [content_from_node(item, fetched_at=fetched_at) for item in root.children("aweme_list")]
+    raw_more = root.present("has_more")
+    if raw_more not in (0, 1, False, True):
+        raise root.missing("has_more")
+    has_more = bool(raw_more)
+    cursor = optional_id(root.get("cursor")) if has_more else None
+    if has_more and (cursor is None or cursor == (requested_cursor or "0")):
+        raise root.missing("cursor")
+    return Page(items=items, cursor=cursor, has_more=has_more)
+
+
 def parse_collection_posts(payload: Mapping[str, Any], *, fetched_at: datetime) -> Page[Content]:
     """Parse ``/aweme/v1/web/collects/video/list/``.
 
@@ -586,6 +607,7 @@ __all__ = [
     "content_web_url",
     "detect_risk_control",
     "parse_author",
+    "parse_author_bookmarks",
     "parse_author_posts",
     "parse_comment_replies",
     "parse_comments",

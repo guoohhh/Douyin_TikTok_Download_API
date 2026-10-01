@@ -141,6 +141,7 @@ class RpcSigner:
             "url": spec.url,
             "query": query,
             "params": params,
+            "body": spec.body.decode("utf-8") if spec.body is not None else None,
             "user_agent": identity_fingerprint.user_agent,
             # The identity's own session. browser-rpc loads a page with these
             # cookies and signs there, so `verifyFp` names the same

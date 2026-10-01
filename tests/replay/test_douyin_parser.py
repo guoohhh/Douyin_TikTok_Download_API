@@ -42,6 +42,61 @@ def fixture(name: str) -> dict:
     return load(PLATFORM, name)
 
 
+def test_default_bookmarks_request_and_pagination() -> None:
+    spec = ADAPTER.build_request(endpoints.AUTHOR_BOOKMARKS, count=5)
+    assert spec["method"] == "POST"
+    assert spec["url"].endswith("/aweme/v1/web/aweme/listcollection/")
+    assert spec["params"]["cursor"] == "0"
+    assert spec["params"]["count"] == "5"
+    assert spec["body"] is None
+
+    item = fixture("video_normal")["aweme_detail"]
+    first = parser.parse_author_bookmarks(
+        {"status_code": 0, "aweme_list": [item], "cursor": 12345, "has_more": 1},
+        fetched_at=FETCHED_AT,
+    )
+    assert [content.content_id for content in first.items] == [NORMAL_ID]
+    assert first.items[0].platform is Platform.DOUYIN
+    assert first.cursor == "12345" and first.has_more is True
+
+    second = parser.parse_author_bookmarks(
+        {"status_code": 0, "aweme_list": [item], "cursor": 12000, "has_more": 1},
+        fetched_at=FETCHED_AT,
+        requested_cursor=first.cursor,
+    )
+    assert second.cursor == "12000" and second.has_more is True
+
+    last = parser.parse_author_bookmarks(
+        {"status_code": 0, "aweme_list": [item], "cursor": 0, "has_more": 0},
+        fetched_at=FETCHED_AT,
+        requested_cursor=second.cursor,
+    )
+    assert last.cursor is None and last.has_more is False
+    assert [content.content_id for content in last.items] == [NORMAL_ID]
+
+
+@pytest.mark.parametrize(
+    "payload,requested_cursor",
+    [
+        ({"aweme_list": [], "cursor": 10, "has_more": 1}, "10"),
+        ({"aweme_list": [], "has_more": 1}, None),
+        ({"aweme_list": [], "cursor": 0, "has_more": 1}, None),
+        ({"aweme_list": [], "cursor": 10}, None),
+        ({"cursor": 10, "has_more": 1}, None),
+        ({"aweme_list": [], "cursor": 10, "has_more": "yes"}, None),
+    ],
+)
+def test_default_bookmarks_rejects_malformed_pagination(
+    payload: dict, requested_cursor: str | None
+) -> None:
+    with pytest.raises(UpstreamChanged):
+        parser.parse_author_bookmarks(
+            {"status_code": 0, **payload},
+            fetched_at=FETCHED_AT,
+            requested_cursor=requested_cursor,
+        )
+
+
 # --------------------------------------------------------------------------
 # Content detail: the happy path, asserted exhaustively
 # --------------------------------------------------------------------------

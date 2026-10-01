@@ -263,8 +263,8 @@
         "description": "退出除当前设备之外的所有登录。"
       },
       "author_bookmarks": {
-        "summary": "获取作者收藏的作品",
-        "description": "分页获取作者收藏的作品，跨全部收藏夹——这是「收藏」页的另一半，/user/collections 列的是收藏夹本身。仅支持 TikTok，且只能读账号自己的收藏：与 /user/collections 不同，这里没有公开的那一半，因为请求指名的是账号而不是收藏夹。游客身份会被直接拒绝，所以必须把 identity 指向从该账号导入的身份。想读别人公开的收藏夹，请改用 /collection/posts。"
+        "summary": "获取账号收藏的作品",
+        "description": "分页获取账号收藏的作品。抖音返回默认「收藏 → 视频」列表，与命名收藏夹分开；必须显式指定已认证的导入身份，不接受 url 或 sec_user_id。TikTok 返回账号自己的收藏作品。要读取命名收藏夹中的作品，请使用 /collection/posts。"
       },
       "author_collections": {
         "summary": "获取收藏夹列表",
