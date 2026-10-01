@@ -206,6 +206,7 @@ _ARGUMENTS: Final[Mapping[Platform, Mapping[Capability, Mapping[str, str]]]] = {
         # the honest answer. Dropping it would return the operator's own
         # folders under a stranger's name.
         Capability.AUTHOR_COLLECTIONS: {CURSOR: "cursor", COUNT: "count"},
+        Capability.AUTHOR_BOOKMARKS: {CURSOR: "cursor", COUNT: "count"},
         Capability.COLLECTION_POSTS: {
             COLLECTION_ID: "collection_id",
             CURSOR: "cursor",
@@ -426,13 +427,16 @@ class EndpointDefinition:
                 Capability.AUTHOR_POSTS
                 | Capability.AUTHOR_LIKES
                 | Capability.MIX_POSTS
-                | Capability.AUTHOR_BOOKMARKS
                 | Capability.AUTHOR_REPOSTS
             ):
                 # All five are a page of posts in the platform's own list
                 # envelope - `aweme_list`/`max_cursor` on Douyin, `itemList`/
                 # `cursor` on TikTok - so one parser answers for all of them.
                 return adapter.parse_author_posts(payload, fetched_at=when)
+            case Capability.AUTHOR_BOOKMARKS:
+                return adapter.parse_author_bookmarks(
+                    payload, fetched_at=when, requested_cursor=canonical.get(CURSOR)
+                )
             case Capability.AUTHOR_FOLLOWERS | Capability.AUTHOR_FOLLOWING:
                 # One endpoint answers both, selected by a `scene` parameter, so
                 # one parser answers for both too.

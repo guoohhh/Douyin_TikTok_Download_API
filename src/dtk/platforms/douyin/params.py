@@ -254,6 +254,21 @@ def author_collections_params(
     }
 
 
+def author_bookmarks_params(
+    *,
+    cursor: str | None = None,
+    count: int = DEFAULT_PAGE_SIZE,
+    profile: ClientProfile = DEFAULT_PROFILE,
+) -> dict[str, str]:
+    """The signed-in account's default video favorites.
+
+    Measured against ``listcollection/``: POST with these query parameters and
+    no request body. Its cursor is a timestamp-like opaque string, not a folder
+    id or a named collection cursor.
+    """
+    return {**base_params(profile), "cursor": _cursor(cursor), "count": str(count)}
+
+
 def collection_posts_params(
     *,
     collection_id: str,

@@ -17,6 +17,7 @@ from typing import Final
 
 from dtk.platforms.base import EndpointSpec, EndpointTable
 from dtk.platforms.douyin.params import (
+    author_bookmarks_params,
     author_collections_params,
     author_likes_params,
     author_posts_params,
@@ -198,6 +199,7 @@ COMMENTS: Final = "douyin.comments"
 COMMENT_REPLIES: Final = "douyin.comment_replies"
 AUTHOR_LIKES: Final = "douyin.author_likes"
 AUTHOR_COLLECTIONS: Final = "douyin.author_collections"
+AUTHOR_BOOKMARKS: Final = "douyin.author_bookmarks"
 COLLECTION_POSTS: Final = "douyin.collection_posts"
 MIX_POSTS: Final = "douyin.mix_posts"
 SESSION_CHECK: Final = "douyin.session_check"
@@ -276,6 +278,15 @@ ENDPOINTS: Final = EndpointTable.of(
         summary="The bookmark folders belonging to the signed-in identity",
     ),
     EndpointSpec(
+        name=AUTHOR_BOOKMARKS,
+        path=DouyinAPIEndpoints.USER_COLLECTION,
+        method="POST",
+        required=(),
+        build=author_bookmarks_params,
+        risk_weight=1.8,
+        summary="Default video favorites belonging to the signed-in identity",
+    ),
+    EndpointSpec(
         name=COLLECTION_POSTS,
         path=DouyinAPIEndpoints.USER_COLLECTS_VIDEO,
         # The builder keyword, not Douyin's spelling: the platform calls it
@@ -313,6 +324,7 @@ ENDPOINTS: Final = EndpointTable.of(
 
 
 __all__ = [
+    "AUTHOR_BOOKMARKS",
     "AUTHOR_COLLECTIONS",
     "AUTHOR_LIKES",
     "AUTHOR_POSTS",

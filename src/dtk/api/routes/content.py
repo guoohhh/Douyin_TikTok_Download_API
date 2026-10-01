@@ -20,6 +20,7 @@ Two rules are enforced here and nowhere else:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -51,6 +52,7 @@ from dtk.core.errors import (
 )
 from dtk.core.logging import get_logger
 from dtk.core.types import Platform, Scope
+from dtk.db.models import Identity as IdentityRow
 from dtk.i18n.messages import render_error
 from dtk.platforms.paging import max_page_size
 from dtk.urls import ResourceKind, UrlKind, first_url, identify, require_content_id
@@ -1014,11 +1016,11 @@ async def user_bookmarks(
     explain: bool = EXPLAIN_QUERY,
     principal: Principal = Depends(enforce_rate_limit),
 ) -> Any:
-    """One page of the posts an author has saved, across every folder.
+    """One page of posts saved by the pinned account.
 
-    **TikTok only**, and **only ever the account's own list**. This is the other
-    half of the Saved tab: `/user/collections` lists the folders, this lists
-    what is in the tab regardless of folder.
+    On Douyin this is the default video favorites list, separate from named
+    collections. It requires an explicitly pinned imported authenticated
+    identity. On TikTok this is the account's own saved-post list.
 
     Unlike `/user/collections`, there is no public half to this one: the
     request names an account rather than a folder. Measured with a guest
@@ -1029,9 +1031,8 @@ async def user_bookmarks(
 
     **Parameters**
 
-    - `platform` - must be `tiktok`.
-    - `url` - a link to the author's profile page.
-    - `sec_user_id` - the author's stable id, if you already have it.
+    - `platform` - `douyin` or `tiktok`.
+    - `url` / `sec_user_id` - TikTok author only; omit for Douyin.
     - `cursor` - the cursor returned by the previous page. Omit it for the
       first page; a response with no cursor is the last page.
     - `count` - posts per page. TikTok refuses more than 35.
@@ -1048,7 +1049,22 @@ async def user_bookmarks(
     for the next page.
     """
     authorize(principal, platform)
-    params = _author_params(platform, url=url, sec_user_id=sec_user_id)
+    if platform is Platform.DOUYIN:
+        params = _refuse_author(url=url, sec_user_id=sec_user_id, endpoint="user/bookmarks")
+        if not identity or not identity.strip():
+            raise InvalidParam(
+                "identity is required for Douyin bookmarks", details={"field": "identity"}
+            )
+    else:
+        params = _author_params(platform, url=url, sec_user_id=sec_user_id)
+    pinned = await resolve_request_identity(request, principal, identity, platform=platform)
+    if platform is Platform.DOUYIN:
+        row = await request.state.db.get(IdentityRow, uuid.UUID(pinned))
+        if row is None or row.source != "imported" or not row.authenticated:
+            raise InvalidParam(
+                "Douyin bookmarks require an authenticated imported identity",
+                details={"field": "identity"},
+            )
     params.update(
         {
             "cursor": cursor,
@@ -1065,7 +1081,7 @@ async def user_bookmarks(
         proxy=await resolve_request_proxy(request, proxy),
         refresh=refresh,
         explain=await resolve_explain(request, principal, explain),
-        identity=await resolve_request_identity(request, principal, identity, platform=platform),
+        identity=pinned,
     )
 
 

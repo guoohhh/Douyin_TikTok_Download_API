@@ -124,12 +124,14 @@ class FakeTransport:
         self.answer = answer
         #: Every identity the transport was asked to send as.
         self.senders: list[Any] = []
+        self.specs: list[Any] = []
 
     def classify(self, response=None, exception=None, *, empty_body_is_normal=False):
         return classify_detailed(response, exception)
 
     async def request(self, identity: Any, spec: Any, timeout: float | None = None) -> RawResponse:
         self.senders.append(identity)
+        self.specs.append(spec)
         if isinstance(self.answer, BaseException):
             raise self.answer
         return self.answer
@@ -166,7 +168,7 @@ def identity() -> LiveIdentity:
     )
 
 
-async def signer(platform: Platform, url: str, params: dict[str, Any], sender: TransportIdentity):
+async def signer(platform: Platform, spec: dict[str, Any], sender: TransportIdentity):
     """The real SignedParams, so the pipeline's signer seam is exercised."""
     return SignedParams(query="a_bogus=AAA", params={"a_bogus": "AAA"}, signer=SIGNER_BROWSER)
 
@@ -519,6 +521,94 @@ class TestDump:
         assert isinstance(dumped["content_id"], str)
 
 
+async def test_default_bookmarks_post_and_pin_reach_signer_and_transport() -> None:
+    from dtk.db.models import Identity as IdentityRow
+    from dtk.platforms.douyin.endpoints import AUTHOR_BOOKMARKS
+
+    seen: list[Any] = []
+
+    async def recording_signer(
+        platform: Platform, spec: dict[str, Any], sender: TransportIdentity
+    ) -> SignedParams:
+        seen.append((platform, spec, sender))
+        return SignedParams(
+            query="cursor=0&count=5&a_bogus=AAA", params={"a_bogus": "AAA"}, signer=SIGNER_BROWSER
+        )
+
+    transport = FakeTransport(response(200, {"status_code": 0, "aweme_list": [], "has_more": 0}))
+    scheduler = FakeScheduler()
+    svc = FetchService(
+        scheduler=scheduler,  # type: ignore[arg-type]
+        pool=FakePool(identity()),  # type: ignore[arg-type]
+        transport=transport,  # type: ignore[arg-type]
+        sign=recording_signer,
+        cooldown_base=60,
+    )
+
+    class BookmarksSession(FakeSession):
+        async def get(self, entity: Any, key: Any) -> Any:
+            if entity is IdentityRow:
+                return SimpleNamespace(
+                    platform="douyin",
+                    source="imported",
+                    authenticated=True,
+                    state="active",
+                    proxy_id=self.proxy_id,
+                )
+            return await super().get(entity, key)
+
+    await svc.fetch(
+        BookmarksSession(),  # type: ignore[arg-type]
+        Platform.DOUYIN,
+        AUTHOR_BOOKMARKS,
+        {"count": 5},
+        parse=lambda payload: payload,
+        ctx=FetchContext(identity_id=IDENTITY_ID),
+    )
+    assert scheduler.asked_for == [IDENTITY_ID]
+    assert len(seen) == len(transport.specs) == 1
+    assert seen[0][1]["method"] == transport.specs[0].method == "POST"
+    assert seen[0][1]["params"]["count"] == "5"
+    assert seen[0][1]["body"] is None and transport.specs[0].body is None
+    assert seen[0][2] is transport.senders[0]
+
+
+async def test_default_bookmarks_without_pin_never_reaches_scheduler() -> None:
+    from dtk.core.errors import InvalidParam
+    from dtk.platforms.douyin.endpoints import AUTHOR_BOOKMARKS
+
+    scheduler = FakeScheduler()
+    svc = service(scheduler=scheduler)
+    with pytest.raises(InvalidParam):
+        await svc.fetch(
+            FakeSession(),  # type: ignore[arg-type]
+            Platform.DOUYIN,
+            AUTHOR_BOOKMARKS,
+            {"count": 5},
+            parse=lambda payload: payload,
+        )
+    assert scheduler.asked_for == []
+
+
+def test_post_body_and_params_are_identical_for_signing_and_transport() -> None:
+    from dtk.services.fetch import _to_transport_spec
+    from dtk.worker.runtime import _signing_request
+
+    spec = {
+        "method": "POST",
+        "url": "https://www.douyin.com/aweme/v1/web/aweme/listcollection/",
+        "params": {"cursor": "0", "count": "5"},
+        "headers": {},
+        "body": {"example": "\u89c6\u9891"},
+    }
+    signed = SignedParams(query="cursor=0&count=5&a_bogus=AAA", params={"a_bogus": "AAA"})
+    signing = _signing_request(spec)
+    outbound = _to_transport_spec(spec, signed, "douyin.author_bookmarks")
+    assert signing.method == outbound.method == "POST"
+    assert signing.params == spec["params"]
+    assert signing.body == outbound.body == b'{"example":"\xe8\xa7\x86\xe9\xa2\x91"}'
+
+
 class TestTransportSpecSeam:
     """The platform layer and the transport layer both define a RequestSpec.
 
@@ -620,13 +710,13 @@ class TestTransportSpecSeam:
         assert out.params == {"aweme_id": "1"}
         assert out.url.endswith("/aweme/detail/")
 
-    def test_empty_body_becomes_none_rather_than_an_empty_object(self):
+    def test_body_is_encoded_once_for_transport(self):
         from dtk.services.fetch import _to_transport_spec
 
-        assert _to_transport_spec(self._spec(body={}), self._signed(), "e").json_body is None
-        assert _to_transport_spec(self._spec(body={"a": 1}), self._signed(), "e").json_body == {
-            "a": 1
-        }
+        assert _to_transport_spec(self._spec(body=None), self._signed(), "e").body is None
+        out = _to_transport_spec(self._spec(body={"a": 1}), self._signed(), "e")
+        assert out.body == b'{"a":1}'
+        assert out.headers["Content-Type"] == "application/json"
 
 
 async def test_the_signature_and_the_request_describe_the_same_visitor() -> None:
@@ -641,9 +731,7 @@ async def test_the_signature_and_the_request_describe_the_same_visitor() -> None
     """
     signed_as: list[Any] = []
 
-    async def recording_signer(
-        platform: Platform, url: str, params: dict[str, Any], sender: TransportIdentity
-    ):
+    async def recording_signer(platform: Platform, spec: dict[str, Any], sender: TransportIdentity):
         signed_as.append(sender)
         return SignedParams(query="a_bogus=AAA", params={"a_bogus": "AAA"}, signer=SIGNER_BROWSER)
 

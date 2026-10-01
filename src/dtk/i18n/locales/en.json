@@ -263,8 +263,8 @@
         "description": "Sign out everywhere except here."
       },
       "author_bookmarks": {
-        "summary": "Posts an author has saved",
-        "description": "One page of the posts an author has saved, across every folder - the other half of the Saved tab, where /user/collections lists the folders. TikTok only, and only ever the account's own list: unlike /user/collections there is no public half here, because the request names an account rather than a folder. A guest identity is refused outright, so point identity at an identity imported from that account's session. For someone else's public folder, use /collection/posts."
+        "summary": "Posts saved by the account",
+        "description": "One page of saved posts. On Douyin this is the default Favorites → Videos list, separate from named collections, and requires an explicitly pinned authenticated imported identity; url and sec_user_id are not accepted. On TikTok this is the account's own saved-post list. For posts in a named folder, use /collection/posts."
       },
       "author_collections": {
         "summary": "Bookmark folders",

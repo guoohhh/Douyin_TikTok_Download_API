@@ -38,7 +38,13 @@ pytestmark = pytest.mark.integration
 DOUYIN_VIDEO = "https://www.douyin.com/video/7123456789012345678"
 
 
-async def make_identity(*, platform: str = "douyin", state: str = "active") -> uuid.UUID:
+async def make_identity(
+    *,
+    platform: str = "douyin",
+    state: str = "active",
+    source: IdentitySource = IdentitySource.MINTED,
+    authenticated: bool = False,
+) -> uuid.UUID:
     identity_id = uuid.uuid4()
     async with session_scope() as session:
         session.add(
@@ -48,10 +54,40 @@ async def make_identity(*, platform: str = "douyin", state: str = "active") -> u
                 state=state,
                 cookies_encrypted=b"ciphertext",
                 fingerprint={},
-                source=IdentitySource.MINTED.value,
+                source=source.value,
+                authenticated=authenticated,
             )
         )
     return identity_id
+
+
+async def test_douyin_bookmarks_requires_imported_pin(client: Any) -> None:
+    await signed_in(client)
+    path = "/api/v1/douyin/user/bookmarks"
+    missing = await client.get(path)
+    assert error_code(missing) == "INVALID_PARAM"
+    assert envelope(missing)["error"]["details"]["field"] == "identity"
+
+    minted = await make_identity()
+    wrong = await client.get(path, params={"identity": str(minted)})
+    assert error_code(wrong) == "INVALID_PARAM"
+
+    unauthenticated = await make_identity(source=IdentitySource.IMPORTED)
+    unauthorized = await client.get(path, params={"identity": str(unauthenticated)})
+    assert error_code(unauthorized) == "INVALID_PARAM"
+
+    malformed = await client.get(path, params={"identity": "not-a-uuid"})
+    assert error_code(malformed) == "INVALID_PARAM"
+
+    imported = await make_identity(source=IdentitySource.IMPORTED, authenticated=True)
+    accepted = await client.get(path, params={"identity": str(imported), "count": 5})
+    assert accepted.status_code == 202
+    params = await stored_params(accepted)
+    assert params["identity"] == str(imported)
+    assert params["count"] == 5
+
+    author = await client.get(path, params={"identity": str(imported), "sec_user_id": "someone"})
+    assert error_code(author) == "INVALID_PARAM"
 
 
 async def stored_params(response: Any) -> dict[str, Any]:
